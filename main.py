@@ -28,7 +28,31 @@ fake_users_db = {
         "password": "password1"
     }
 }
-# classes
+
+# managers
+
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def send_personal_message(self, message: str, websocket: WebSocket):
+        await websocket.send_text(message)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            await connection.send_text(message)
+
+
+manager = ConnectionManager()
+# models
 
 
 class User(BaseModel):
@@ -111,32 +135,52 @@ async def get():
 #     return user
 
 
-@app.websocket('/ws/notify')
-async def notify_socket(websocket: WebSocket, token: Annotated[str, Depends(oauth2_scheme)], message: str):
+@app.websocket("/ws/test")
+async def helloworld(websocket: WebSocket):
     await websocket.accept()
+    await websocket.send_text("Hello World")
+    while True:
+        data = await websocket.receive_text()
+        await websocket.send_text(f"Message text was: {data}")
+
+
+@app.websocket('/ws/notify')
+async def notify_socket(websocket: WebSocket, token: Annotated[str, Depends(oauth2_scheme)]):
+    await websocket.accept()
+    await manager.connect(websocket)
     try:
+        # authorize
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         micro = payload.get("sub")
         if micro is None:
             raise WebSocketException(code=403)
+
+        while True:
+            data = await websocket.receive_text()
+            # broadcast
+            await manager.broadcast(data)
+
         # TODO: extract micro info
         await websocket.send_text(f"Here your decoded token: connected")
         # error
     except:
         await websocket.send_text("You are not authorized")
-        await websocket.close()
+        manager.disconnect(websocket)
 
 
-@app.websocket('/ws')
+@app.websocket('/ws/user-connect')
 async def websocket(websocket: WebSocket, token: Annotated[str, Depends(oauth2_scheme)]):
     await websocket.accept()
+    await manager.connect(websocket)
     try:
+        # authorize
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user = payload.get("sub")
         if user is None:
             raise WebSocketException(code=403)
+
         # TODO: extract user info
-        await websocket.send_text(f"Here your decoded token: connected")
+        await websocket.send_text(f"User connected")
         # error
     except:
         await websocket.send_text("You are not authorized")
