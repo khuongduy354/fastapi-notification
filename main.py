@@ -13,7 +13,13 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 SECRET_KEY = "asdfasdf"
 ALGORITHM = "HS256"
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+fake_microservices_db = {
+    "2f8e214e8b2049d39dc8f7a4137789d2": {
+        # TODO: here i auth microservice with uuid4 only, find other method to auth microservice
+        "uuid4": "2f8e214e8b2049d39dc8f7a4137789d2",
+        "name": "microservice1",
 
+    }}
 fake_users_db = {
     "2f8e214e8b2049d39dc8f7a4137789d2": {
         "uuid4": "2f8e214e8b2049d39dc8f7a4137789d2",
@@ -105,6 +111,22 @@ async def get():
 #     return user
 
 
+@app.websocket('/ws/notify')
+async def notify_socket(websocket: WebSocket, token: Annotated[str, Depends(oauth2_scheme)], message: str):
+    await websocket.accept()
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        micro = payload.get("sub")
+        if micro is None:
+            raise WebSocketException(code=403)
+        # TODO: extract micro info
+        await websocket.send_text(f"Here your decoded token: connected")
+        # error
+    except:
+        await websocket.send_text("You are not authorized")
+        await websocket.close()
+
+
 @app.websocket('/ws')
 async def websocket(websocket: WebSocket, token: Annotated[str, Depends(oauth2_scheme)]):
     await websocket.accept()
@@ -134,6 +156,30 @@ async def websocket(websocket: WebSocket, token: Annotated[str, Depends(oauth2_s
 #
 #     # return token
 #     return {"access_token": access_token, "refresh_token": refresh_token}
+
+@app.post("/microservice/token", response_model=Token)
+async def request_access_token(
+        uuid4: str
+):
+    if uuid4 is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        return
+    micro = fake_microservices_db.get(uuid4)
+    if not micro:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": micro}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 @app.post("/token", response_model=Token)
